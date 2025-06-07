@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 jenkins_client: Optional[JenkinsClient] = None
 
 
-async def serve():
+def serve():
     """Main MCP server entry point"""
     global jenkins_client
     
@@ -91,8 +91,8 @@ async def serve():
             return f"Error fetching job info: {str(e)}"
 
     # Run the MCP server
-    await mcp.run()
+    mcp.run()
 
 
 if __name__ == "__main__":
-    asyncio.run(serve()) 
+    serve() 

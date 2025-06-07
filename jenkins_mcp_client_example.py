@@ -6,17 +6,19 @@ This demonstrates how to use the Jenkins MCP server as a subprocess
 
 import asyncio
 import os
+from dotenv import load_dotenv
 from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerStdio
 
+load_dotenv()
 
 async def main():
     """Example using Jenkins MCP server with credentials provided at startup"""
     
     # Replace these with your actual Jenkins credentials
-    jenkins_url = "https://your-jenkins.com"
-    jenkins_username = "your-username"
-    jenkins_token = "your-api-token"
+    jenkins_url = os.getenv('JENKINS_URL')
+    jenkins_username = os.getenv('JENKINS_USERNAME')  # Replace with your actual username
+    jenkins_token = os.getenv('JENKINS_TOKEN')    # Replace with your actual API token
     
     # Create MCP server with Jenkins credentials provided as command arguments
     jenkins_server = MCPServerStdio(
@@ -46,21 +48,21 @@ async def main():
         
         # Example 1: Get job information
         result = await main_agent.run(
-            "Please get information about the job at https://jenkins.company.com/job/my-project/"
+            "Please get information about the job at https://core.jenkins.hyperloop.sonynei.net/job/your-actual-job-name/"
         )
-        print("Job Info Result:", result.data)
+        print("Job Info Result:", result.output)
         
         # Example 2: Get console log
         result = await main_agent.run(
-            "Please fetch the console log for the latest build of https://jenkins.company.com/job/my-project/"
+            "Please fetch the console log for the latest build of https://core.jenkins.hyperloop.sonynei.net/job/your-actual-job-name/"
         )
-        print("Console Log Result:", result.data)
+        print("Console Log Result:", result.output)
         
         # Example 3: Analyze a specific build
         result = await main_agent.run(
-            "Please analyze build #123 of https://jenkins.company.com/job/my-project/ - get both job info and console log to help me understand what happened"
+            "Please analyze build #123 of https://core.jenkins.hyperloop.sonynei.net/job/your-actual-job-name/ - get both job info and console log to help me understand what happened"
         )
-        print("Analysis Result:", result.data)
+        print("Analysis Result:", result.output)
 
 
 if __name__ == "__main__":
