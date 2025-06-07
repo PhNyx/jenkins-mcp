@@ -1,6 +1,6 @@
-# Jenkins MCP Server with Pydantic-ai
+# Jenkins MCP Server with FastMCP
 
-A Jenkins integration using Pydantic-ai that provides console log fetching capabilities via MCP (Model Context Protocol) server. 
+A Jenkins integration using FastMCP that provides console log fetching capabilities via MCP (Model Context Protocol) server. 
 
 **Key Design**: Jenkins credentials are provided once when the MCP server starts, and tool calls only need job URLs.
 
@@ -11,7 +11,28 @@ A Jenkins integration using Pydantic-ai that provides console log fetching capab
 - **Flexible URL Handling**: Supports both full Jenkins URLs and job paths
 - **Latest Build Support**: Automatically fetches the latest build if no build number is specified
 - **Secure Credential Handling**: Jenkins credentials provided at server startup, not with each tool call
-- **Pydantic-ai Integration**: Uses Pydantic-ai's built-in MCP server capabilities
+- **True MCP Server**: Uses FastMCP to implement a proper MCP server that other agents can connect to
+
+## Architecture
+
+This implementation uses the Model Context Protocol (MCP) architecture:
+
+1. **MCP Server** (`jenkins_mcp_server.py`): Runs as a subprocess and exposes Jenkins tools via MCP protocol
+2. **MCP Client**: Other Pydantic AI agents connect to the server using `MCPServerStdio`
+
+```
+┌─────────────────┐    MCPServerStdio    ┌─────────────────┐
+│   Main Agent    │ ◄─────────────────► │ Jenkins MCP     │
+│                 │      (subprocess)    │ Server          │
+│ (with OpenAI)   │                      │ (FastMCP)       │
+└─────────────────┘                      └─────────────────┘
+                                                  │
+                                                  ▼
+                                         ┌─────────────────┐
+                                         │ Jenkins API     │
+                                         │                 │
+                                         └─────────────────┘
+```
 
 ## Setup
 
@@ -32,18 +53,19 @@ To use this server, you'll need a Jenkins API token:
 5. Give it a name and click "Generate"
 6. Copy the generated token (you won't be able to see it again)
 
-## Usage
+### 3. OpenAI API Key
 
-### 1. Start MCP Server with Credentials
+Set your OpenAI API key in your environment or `.env` file:
 
 ```bash
-python jenkins_mcp_server.py \
-  --jenkins-url https://your-jenkins.com \
-  --username your-username \
-  --token your-api-token
+export OPENAI_API_KEY="your-api-key-here"
 ```
 
-### 2. Use via Pydantic-ai MCPServerStdio
+## Usage
+
+### Method 1: Use via Pydantic AI MCPServerStdio (Recommended)
+
+This is the proper MCP way - the Jenkins server runs as a subprocess and other agents connect to it:
 
 ```python
 from pydantic_ai.mcp import MCPServerStdio
@@ -64,134 +86,93 @@ jenkins_server = MCPServerStdio(
 # Use in another agent
 main_agent = Agent('openai:gpt-4o-mini', mcp_servers=[jenkins_server])
 
-# Tool calls only need job URLs
 async with main_agent.run_mcp_servers():
     result = await main_agent.run(
-        "Get console log for https://jenkins.com/job/my-project/"
+        "Please fetch the console log for job https://jenkins.company.com/job/my-project/"
     )
+    print(result.data)
 ```
 
-### 3. Direct Agent Usage (for testing)
+### Method 2: Direct MCP Server Testing
+
+For testing the MCP server directly:
 
 ```bash
-python jenkins_agent.py
+python jenkins_mcp_server.py \
+  --jenkins-url https://your-jenkins.com \
+  --username your-username \
+  --token your-api-token
 ```
 
-### Available Tools
+This will start the MCP server and wait for MCP client connections via stdin/stdout.
 
-#### 1. `fetch_console_log`
+## Example Client
 
-Fetches the console log from a Jenkins job build using pre-configured credentials.
+See `jenkins_mcp_client_example.py` for a complete example of how to use the Jenkins MCP server from another Pydantic AI agent.
 
-**Parameters:**
-- `job_url` (required): Full Jenkins job URL or job path
-- `build_number` (optional): Specific build number (defaults to latest build)
+## Available MCP Tools
 
-**Example job URLs:**
-- Full URL: `https://jenkins.company.com/job/my-project/job/main/`
-- Job path: `my-project/main`
+When connected via MCPServerStdio, the following tools are available (with `jenkins_` prefix by default):
 
-#### 2. `get_job_info`
-
-Gets basic information about a Jenkins job using pre-configured credentials.
-
-**Parameters:**
-- `job_url` (required): Full Jenkins job URL or job path
-
-### Supported Jenkins URL Formats
-
-The server can handle various Jenkins URL formats:
-
-- Standard jobs: `/job/jobname/`
-- Folder-based jobs: `/job/folder/job/jobname/`
-- Multi-level folders: `/job/folder1/job/folder2/job/jobname/`
-- Direct job paths: `folder/jobname`
-
-### Example Usage with MCP Client
-
-When integrated with an MCP client, tool calls only need job URLs:
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "jenkins_fetch_console_log",
-    "arguments": {
-      "job_url": "https://jenkins.company.com/job/my-project/job/main/",
-      "build_number": 42
-    }
-  }
-}
-```
-
-Note: Tool names are prefixed with `jenkins_` when using the `tool_prefix="jenkins"` setting.
-
-## Security Considerations
-
-- **Never commit API tokens to version control**
-- Credentials are provided only at server startup, not with each tool call
-- No credential storage or caching in the server
-- Uses HTTPS when possible for Jenkins communication
-- API tokens should be scoped appropriately in Jenkins
-- Credentials are isolated within the MCP server subprocess
-
-## Error Handling
-
-The server provides detailed error messages for common issues:
-
-- Invalid Jenkins URLs
-- Authentication failures
-- Network connectivity issues
-- Missing builds or jobs
-- Permission denied errors
+- `jenkins_fetch_console_log`: Get console logs from Jenkins builds
+- `jenkins_get_job_info`: Get job/build information
 
 ## Development
 
 ### Project Structure
 
 ```
-├── jenkins_agent.py           # Jenkins agent (for direct use, expects credentials per call)
-├── jenkins_mcp_server.py      # MCP server (credentials at startup, job URLs in calls)
-├── jenkins_mcp_example.py     # Example usage with MCP integration
-├── test_server.py             # Testing utilities
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
+├── jenkins_mcp_server.py          # Main MCP server (FastMCP)
+├── jenkins_mcp_client_example.py  # Example client usage
+├── jenkins_client.py              # Jenkins API client
+├── test_mcp_server.py             # Tests
+└── requirements.txt               # Dependencies
 ```
 
-### Key Components
+### Testing
 
-- **jenkins_agent.py**: Direct-use agent (credentials per call)
-- **jenkins_mcp_server.py**: MCP server (credentials at startup)
-- **JenkinsClient**: Handles Jenkins API interactions
-- **JenkinsConfig**: Pydantic model for Jenkins connection configuration  
-- **MCPServerStdio**: Pydantic-ai's built-in MCP server integration
+Run the test suite:
 
-### Adding New Features
+```bash
+python test_mcp_server.py
+```
 
-To add new Jenkins-related tools:
+## MCP Protocol Benefits
 
-1. Add methods to the `JenkinsClient` class in `jenkins_agent.py`
-2. Add new tool functions to `jenkins_mcp_server.py` decorated with `@jenkins_mcp_agent.tool`
-3. Follow the pattern: credentials from context, job URLs as parameters
-4. Use Pydantic-ai's tool function signature patterns with `RunContext[ServerContext]`
+Using the MCP protocol provides several advantages:
+
+1. **Standardization**: Works with any MCP-compatible client (Claude Desktop, other AI frameworks)
+2. **Security**: Credentials are isolated in the server process
+3. **Reusability**: Multiple agents can connect to the same server
+4. **Tool Namespacing**: Tool prefixes prevent naming conflicts
+5. **Process Isolation**: Server runs in separate process for better stability
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Authentication Error**: Verify your username and API token
-2. **Job Not Found**: Check the job URL format and permissions
-3. **Network Timeout**: Increase timeout values for slow Jenkins instances
-4. **SSL Certificate Issues**: Jenkins server may have self-signed certificates
+1. **MCP Dependencies**: Make sure you have `mcp>=1.9.2` installed
+2. **FastMCP Import Error**: Ensure all dependencies are properly installed
+3. **Jenkins Authentication**: Verify your API token has the necessary permissions
+4. **OpenAI API Key**: Required for the client agent (not the MCP server itself)
 
 ### Debug Mode
 
-Set logging level to DEBUG for more detailed output:
+Add logging to see MCP communication:
 
 ```python
+import logging
 logging.basicConfig(level=logging.DEBUG)
 ```
 
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
 ## License
 
-This project is open source. Please check with your organization's policies before using with internal Jenkins instances. 
+MIT License 
