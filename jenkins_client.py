@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
 """
-Jenkins Agent using Pydantic-ai
-Provides console log fetching capabilities for Jenkins jobs as tools
+Jenkins Client - Clean version for testing
+Provides console log fetching capabilities for Jenkins jobs
 """
 
 import asyncio
 import json
 import logging
-import sys
-from typing import Any, Dict, List, Optional, Annotated
 import re
+from typing import Optional
 from urllib.parse import urlparse
 import base64
-import os
-from dotenv import load_dotenv
+
 import httpx
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, RunContext
 from log_parser import extract_error_block
-
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,11 +26,6 @@ class JenkinsConfig(BaseModel):
     base_url: str = Field(..., description="Jenkins base URL")
     username: str = Field(..., description="Jenkins username")
     token: str = Field(..., description="Jenkins API token")
-
-
-class JenkinsContext(BaseModel):
-    """Context for Jenkins operations"""
-    config: JenkinsConfig
 
 
 class JenkinsClient:
@@ -168,105 +158,34 @@ class JenkinsClient:
             raise Exception(f"Failed to fetch job info: {str(e)}")
 
 
-# Create the Jenkins agent (only when needed and API key is available)
-jenkins_agent = None
-
-try:
-    # Try to create the agent - will fail if no OpenAI API key
-    jenkins_agent = Agent(
-        'openai:gpt-4.1',  # You can change this to any model you prefer
-        deps_type=JenkinsContext,
-        system_prompt="""You are a Jenkins assistant that helps users fetch console logs and job information.
-        You have access to tools that can connect to Jenkins instances and retrieve build information.
-        Always provide helpful and accurate information about Jenkins jobs and builds."""
+# Simple test function
+async def test_client():
+    """Simple test function"""
+    config = JenkinsConfig(
+        base_url="https://your-jenkins.com",
+        username="your-username",
+        token="your-token"
     )
-except Exception:
-    # Agent creation failed - probably no API key
-    # This is fine for testing just the JenkinsClient
-    jenkins_agent = None
-
-
-# Tool functions - only registered if agent exists
-if jenkins_agent is not None:
-    @jenkins_agent.tool
-    async def fetch_jenkins_console_log_tool(
-        ctx: RunContext[JenkinsContext],
-        jenkins_url: Annotated[str, Field(description="Jenkins base URL (e.g., https://jenkins.company.com)")],
-        username: Annotated[str, Field(description="Jenkins username")],
-        token: Annotated[str, Field(description="Jenkins API token")],
-        job_url: Annotated[str, Field(description="Full Jenkins job URL or job path")],
-        build_number: Annotated[Optional[int], Field(description="Specific build number (optional, defaults to latest)", ge=1)] = None,
-        parse_errors: Annotated[bool, Field(description="Extract only error-relevant sections (default: True)")] = True,
-    ) -> str:
-        """Fetch console log from a Jenkins job build."""
-        
+    
+    client = JenkinsClient(config)
+    
+    # Test URL parsing
+    test_urls = [
+        "https://jenkins.company.com/job/my-project/job/main/",
+        "my-project/main",
+        "simple-job"
+    ]
+    
+    print("Testing URL parsing:")
+    for url in test_urls:
         try:
-            # Create Jenkins client with provided credentials
-            config = JenkinsConfig(
-                base_url=jenkins_url,
-                username=username,
-                token=token
-            )
-            client = JenkinsClient(config)
-            
-            # Fetch console log
-            console_log = await client.get_console_log(job_url, build_number, parse_errors)
-            
-            log_type = "parsed error sections" if parse_errors else "full log"
-            return f"Console log ({log_type}) for job {job_url} (build {build_number or 'latest'}):\n\n{console_log}"
-            
+            job_path, build_number = client._extract_job_path(url)
+            print(f"  ✓ {url} -> Job Path: {job_path}")
+            if build_number:
+                print(f"    -> Build Number: {build_number}")
         except Exception as e:
-            return f"Error fetching console log: {str(e)}"
-
-
-@jenkins_agent.tool
-async def get_jenkins_job_info(
-    ctx: RunContext[JenkinsContext],
-    jenkins_url: Annotated[str, Field(description="Jenkins base URL (e.g., https://jenkins.company.com)")],
-    username: Annotated[str, Field(description="Jenkins username")],
-    token: Annotated[str, Field(description="Jenkins API token")],
-    job_url: Annotated[str, Field(description="Full Jenkins job URL or job path")],
-) -> str:
-    """Get basic information about a Jenkins job."""
-    
-    try:
-        # Create Jenkins client with provided credentials
-        config = JenkinsConfig(
-            base_url=jenkins_url,
-            username=username,
-            token=token
-        )
-        client = JenkinsClient(config)
-        
-        # Fetch job info
-        job_info = await client.get_job_info(job_url)
-        
-        # Format the response nicely
-        formatted_info = json.dumps(job_info, indent=2)
-        
-        return f"Job information for {job_url}:\n\n{formatted_info}"
-        
-    except Exception as e:
-        return f"Error fetching job info: {str(e)}"
-
-
-async def main():
-    """Main entry point - can be used for testing the agent directly"""
-    
-    # Example of running the agent directly (for testing)
-    context = JenkinsContext(config=JenkinsConfig(
-        base_url=os.getenv('JENKINS_URL'),
-        username=os.getenv('JENKINS_USERNAME'), 
-        token=os.getenv('JENKINS_TOKEN')
-    ))
-    
-    result = await jenkins_agent.run(
-        "Get the console log for job.",
-        deps=context
-    )
-    
-    print(result.data)
+            print(f"  ✗ {url} -> ERROR: {e}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(test_client()) 
