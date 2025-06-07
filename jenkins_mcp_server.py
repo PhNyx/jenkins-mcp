@@ -9,11 +9,11 @@ import json
 import logging
 import argparse
 import os
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Union
 
 from dotenv import load_dotenv
 from pydantic import Field
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 # Import Jenkins client from the clean module
 from jenkins_client import JenkinsClient, JenkinsConfig
@@ -38,6 +38,7 @@ def serve():
     parser.add_argument('--jenkins-url', required=True, help='Jenkins base URL')
     parser.add_argument('--username', required=True, help='Jenkins username')
     parser.add_argument('--token', required=True, help='Jenkins API token')
+    parser.add_argument('--http-port', type=int, help='Run as HTTP server on specified port (e.g., 8000)')
     
     args = parser.parse_args()
     
@@ -49,23 +50,31 @@ def serve():
     )
     jenkins_client = JenkinsClient(jenkins_config)
     
-    logger.info(f"Starting Jenkins MCP Server for {jenkins_config.base_url}")
+    if args.http_port:
+        logger.info(f"Starting Jenkins MCP HTTP Server for {jenkins_config.base_url} on port {args.http_port}")
+    else:
+        logger.info(f"Starting Jenkins MCP Server for {jenkins_config.base_url}")
     
     # Create FastMCP server instance
     mcp = FastMCP(name="jenkins-mcp-server")
 
     @mcp.tool(
-        name="fetch_console_log",
         description="Fetch console log from a Jenkins job build using pre-configured credentials."
     )
-    async def fetch_console_log_tool(
+    async def fetch_console_log(
         job_url: Annotated[str, Field(description="Full Jenkins job URL or job path")],
-        build_number: Annotated[Optional[int], Field(description="Specific build number (optional, defaults to latest)", ge=1)] = None,
+        build_number: Annotated[Optional[Union[int, float]], Field(description="Specific build number (optional, defaults to latest)", ge=1)] = None,
         parse_errors: Annotated[bool, Field(description="Extract only error-relevant sections (default: True)")] = True,
     ) -> str:
         """Fetch console log from a Jenkins job build using pre-configured credentials."""
         
         try:
+            # Convert build_number to int if it's a float (handle JSON number type ambiguity)
+            if build_number is not None:
+                build_number = int(build_number)
+                if build_number < 1:
+                    return "Error: build_number must be a positive integer"
+            
             console_log = await jenkins_client.get_console_log(job_url, build_number, parse_errors)
             log_type = "parsed error sections" if parse_errors else "full log"
             return f"Console log ({log_type}) for job {job_url} (build {build_number or 'latest'}):\n\n{console_log}"
@@ -74,10 +83,9 @@ def serve():
             return f"Error fetching console log: {str(e)}"
 
     @mcp.tool(
-        name="get_job_info",
         description="Get basic information about a Jenkins job using pre-configured credentials."
     )
-    async def get_job_info_tool(
+    async def get_job_info(
         job_url: Annotated[str, Field(description="Full Jenkins job URL or job path")],
     ) -> str:
         """Get basic information about a Jenkins job using pre-configured credentials."""
@@ -90,8 +98,11 @@ def serve():
         except Exception as e:
             return f"Error fetching job info: {str(e)}"
 
-    # Run the MCP server
-    mcp.run()
+    # Run the MCP server - either as HTTP server or stdio
+    if args.http_port:
+        mcp.run(transport="streamable-http", port=args.http_port)
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from jenkins_client import JenkinsClient, JenkinsConfig
 
 load_dotenv()
 
-async def test_jenkins_mcp(full_url, override_build_number=None):
+async def test_jenkins_mcp(full_url, override_build_number=None, show_full_log=False):
     """Test the Jenkins MCP server connection and tools"""
     
     # Get Jenkins credentials from environment variables
@@ -88,12 +88,13 @@ async def test_jenkins_mcp(full_url, override_build_number=None):
             except Exception as e:
                 print(f"Error calling get_job_info: {e}")
             
-            # Test the fetch_console_log tool
-            print(f"\nTesting fetch_console_log tool..." + (f" (build #{build_number})" if build_number else " (latest build)"))
+            # Test the fetch_console_log tool with log parsing (relevant info only)
+            print(f"\nTesting fetch_console_log tool with LOG PARSING..." + (f" (build #{build_number})" if build_number else " (latest build)"))
+            print("Using log_parser.py to extract only relevant error information")
             try:
                 console_log_args = {
                     "job_url": job_url,
-                    "parse_errors": True
+                    "parse_errors": True  # This uses log_parser.py to extract relevant info
                 }
                 if build_number:
                     console_log_args["build_number"] = build_number
@@ -102,10 +103,39 @@ async def test_jenkins_mcp(full_url, override_build_number=None):
                     "jenkins_fetch_console_log",  # Note: prefixed with "jenkins_"
                     console_log_args
                 )
-                print("Console log result:")
+                print("Parsed console log result (relevant errors only):")
+                print("=" * 50)
                 print(result)
+                print("=" * 50)
             except Exception as e:
-                print(f"Error calling fetch_console_log: {e}")
+                print(f"Error calling fetch_console_log with parsing: {e}")
+                
+            # Optionally test the fetch_console_log tool without parsing (full log)
+            if show_full_log:
+                print(f"\nTesting fetch_console_log tool WITHOUT parsing (full log)...")
+                try:
+                    console_log_args_full = {
+                        "job_url": job_url,
+                        "parse_errors": False  # Get the full, unparsed log
+                    }
+                    if build_number:
+                        console_log_args_full["build_number"] = build_number
+                        
+                    result_full = await jenkins_server.call_tool(
+                        "jenkins_fetch_console_log",  # Note: prefixed with "jenkins_"
+                        console_log_args_full
+                    )
+                    print("Full console log result (first 1000 chars):")
+                    print("=" * 50)
+                    # Show just the first part to compare
+                    result_text = str(result_full)
+                    if len(result_text) > 1000:
+                        print(result_text[:1000] + "\n... [TRUNCATED - full log is much longer]")
+                    else:
+                        print(result_text)
+                    print("=" * 50)
+                except Exception as e:
+                    print(f"Error calling fetch_console_log without parsing: {e}")
                 
     except Exception as e:
         print(f"Error connecting to MCP server: {e}")
@@ -116,6 +146,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Test Jenkins MCP Server')
     parser.add_argument('full_url', help='Full Jenkins URL including build number (e.g., https://jenkins.example.com/job/my-project/123)')
     parser.add_argument('--build-number', type=int, help='Override build number (optional, overrides build number from URL)')
+    parser.add_argument('--show-full-log', action='store_true', help='Also show the full unparsed console log for comparison')
     
     args = parser.parse_args()
     
@@ -123,5 +154,9 @@ if __name__ == "__main__":
     print(f"Full URL: {args.full_url}")
     if args.build_number:
         print(f"Override Build Number: {args.build_number}")
+    if args.show_full_log:
+        print("Will show both parsed and full console logs for comparison")
+    else:
+        print("Will show only parsed console log (use --show-full-log to see both)")
     
-    asyncio.run(test_jenkins_mcp(args.full_url, args.build_number)) 
+    asyncio.run(test_jenkins_mcp(args.full_url, args.build_number, args.show_full_log)) 
